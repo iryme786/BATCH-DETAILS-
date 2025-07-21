@@ -1,91 +1,94 @@
 import os
-import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from dotenv import load_dotenv
 
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Load environment variables from .env file
+load_dotenv()
 
-# --- Batch Details ---
-# You can easily change the details here
-BATCHES = {
-    "gamu": {
-        "name": "Gamu Batch",
-        "price": 150,
-        "details": "📚 Recorded Lectures\n📝 Notes\n✅ DPP Test Series"
-    },
-    "samu": {
-        "name": "Samu Batch",
-        "price": 200, # Example price for Samu Batch
-        "details": "🎥 Live + Recorded Lectures\n📝 Premium Notes\n🏆 Advanced Test Series"
-    }
-}
+# Get the bot token from environment variables
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Admin Telegram username (without @)
+ADMIN_USERNAME = "zerofraction"
+
+# UPI ID
 UPI_ID = "hasibul-1@ptyes"
 
-# --- Bot Command Handlers ---
+# Batch details
+BATCH_DETAILS = """
+Batch details:
+- Recorded lectures (480p/720p)
+- Notes
+- DPP (with solution)
+- Test series (with solution)
+"""
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a message with two inline buttons that answer the user."""
+async def start(update: Update, context: Application.Context) -> None:
+    """Sends a message with inline keyboards for batch selection."""
     keyboard = [
         [
-            InlineKeyboardButton("Gamu Batch", callback_data='gamu'),
-            InlineKeyboardButton("Samu Batch", callback_data='samu'),
+            InlineKeyboardButton("LAKSHAYA HS 2026", callback_data='select_lakshaya'),
+            InlineKeyboardButton("PRAYAS WBJEE 2026", callback_data='select_prayas')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("👋 Welcome! Please select a batch to see the details:", reply_markup=reply_markup)
+    await update.message.reply_text('Please select a batch:', reply_markup=reply_markup)
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Parses the CallbackQuery and updates the message text."""
+async def button(update: Update, context: Application.Context) -> None:
+    """Handles callback queries from inline keyboard buttons."""
     query = update.callback_query
-    await query.answer() # Acknowledge the button press
+    await query.answer()
 
-    choice = query.data
-
-    if choice in BATCHES:
-        batch = BATCHES[choice]
-        # Show batch details and the "Pay Now" button
-        text = f"✨ *{batch['name']} Details* ✨\n\n{batch['details']}\n\n*Price: ₹{batch['price']}*"
-        
-        keyboard = [[InlineKeyboardButton("💰 Pay Now", callback_data=f'pay_{choice}')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode='Markdown')
-
-    elif choice.startswith('pay_'):
-        # Show payment information
-        text = (
-            f"Please pay using the UPI ID below:\n\n"
-            f"💳 *UPI ID:* `{UPI_ID}`\n\n"
-            f"After payment, please send the screenshot of the transaction here. "
-            f"An admin will confirm and add you to the batch soon! 🔜"
+    if query.data == 'select_lakshaya':
+        price = "150 Rs"
+        batch_name = "LAKSHAYA HS 2026"
+    elif query.data == 'select_prayas':
+        price = "250 Rs"
+        batch_name = "PRAYAS WBJEE 2026"
+    elif query.data == 'pay_now':
+        await query.edit_message_text(
+            f"Please pay to the following UPI ID:\n\n"
+            f"💰 UPI ID: `{UPI_ID}`\n\n"
+            f"After payment, please send a screenshot to @{ADMIN_USERNAME} here. "
+            f"After confirmation, admin will add you soon 🔜"
         )
-        # We remove the buttons after showing the payment info
-        await query.edit_message_text(text=text, parse_mode='Markdown')
+        return # Exit to prevent further processing if pay_now
 
+    # If a batch was selected, show details and pay button
+    if query.data in ['select_lakshaya', 'select_prayas']:
+        keyboard = [
+            [InlineKeyboardButton("Pay Now", callback_data='pay_now')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"You selected: *{batch_name}*\n\n"
+            f"Subscription price: *{price}*\n\n"
+            f"{BATCH_DETAILS}\n"
+            f"Click 'Pay Now' to proceed with payment.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+async def echo(update: Update, context: Application.Context) -> None:
+    """Echos any message a user sends that isn't a command or callback."""
+    # This is optional, but good for debugging or if you want to respond to general messages
+    await update.message.reply_text("I'm a bot designed to help you select batches. Please use the /start command to begin.")
 
 def main() -> None:
-    """Run the bot."""
-    # Get the token from environment variables
-    token = os.environ.get("TELEGRAM_TOKEN")
-    if not token:
-        raise ValueError("Please set the TELEGRAM_TOKEN environment variable.")
+    """Starts the bot."""
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token(token).build()
-
-    # Add handlers
+    # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
-
-    # Run the bot until the user presses Ctrl-C
-    print("Bot is running...")
-    application.run_polling()
+    # Add a message handler for all other messages (optional)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
 
-if __name__ == "__main__":
+    # Run the bot until the user presses Ctrl-C or the process receives SIGINT, SIGTERM or SIGABRT
+    print("Bot is polling...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
     main()
-  
